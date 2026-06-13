@@ -1,0 +1,277 @@
+Gotowe — przygotowałem paczkę z plikami po normalizacji i przygotowaniu pod Twoje etapy projektu:
+
+[ Pobierz paczkę ZIP z przygotowanymi plikami](sandbox:/mnt/data/climate_deforestation_normalized_package.zip)
+
+W środku są:
+
+1. [climate_deforestation_row_level_zscore_features.csv](sandbox:/mnt/data/normalized_climate_deforestation/climate_deforestation_row_level_zscore_features.csv)
+   Plik miesięczny, gotowy do EDA, PCA i metod odległościowych na poziomie obserwacji miesięcznych.
+
+2. [climate_deforestation_state_level_clustering_zscore.csv](sandbox:/mnt/data/normalized_climate_deforestation/climate_deforestation_state_level_clustering_zscore.csv)
+   Plik zagregowany po stanie, gotowy do k-Means / HAC, jeśli chcesz grupować **stany Brazylii**, a nie pojedyncze miesiące.
+
+3. [climate_deforestation_supervised_modeling_base.csv](sandbox:/mnt/data/normalized_climate_deforestation/climate_deforestation_supervised_modeling_base.csv)
+   Plik bazowy do klasyfikacji nadzorowanej. Celowo bez globalnego skalowania, żeby nie zrobić data leakage.
+
+4. [climate_deforestation_association_rules_discretized.csv](sandbox:/mnt/data/normalized_climate_deforestation/climate_deforestation_association_rules_discretized.csv)
+   Plik pod reguły asocjacyjne, ze zmiennymi zamienionymi na kategorie typu `Low`, `Medium`, `High`, `Critical`.
+
+5. [climate_deforestation_scaling_metadata.csv](sandbox:/mnt/data/normalized_climate_deforestation/climate_deforestation_scaling_metadata.csv)
+   Parametry skalowania: średnie, odchylenia standardowe, minima, maksima i progi kwartylowe.
+
+---
+
+## Co zrobiłem
+
+Plik wejściowy miał:
+
+```text
+5795 wierszy
+16 kolumn
+25 stanów
+0 braków danych
+```
+
+Nie trzeba było więc robić imputacji braków danych.
+
+## 1. Nie znormalizowałem wszystkiego „na ślepo”
+
+To jest ważne. Nie powinno się standaryzować wszystkich kolumn liczbowych bez zastanowienia.
+
+Nie standaryzowałem bezpośrednio:
+
+```text
+Year
+Month
+State
+Deforestation_ha
+CO2_Emissions
+```
+
+Dlaczego?
+
+`State` to identyfikator tekstowy.
+
+`Year` i `Month` to zmienne czasowe. Sam miesiąc jako liczba jest problematyczny, bo grudzień `12` i styczeń `1` są blisko w czasie, ale liczbowo daleko. Dlatego dodałem:
+
+```text
+Month_sin
+Month_cos
+```
+
+To lepsze kodowanie sezonowości.
+
+`Deforestation_ha` to zmienna docelowa albo zmienna, na podstawie której tworzysz klasę wylesiania. Nie powinna być zwykłą cechą wejściową przy klasyfikacji.
+
+`CO2_Emissions` też zostawiłem poza cechami modelowymi, bo wygląda na silnie zależne od `Deforestation_ha`. Użycie jej do przewidywania klasy wylesiania mogłoby dać sztucznie dobry wynik.
+
+## 2. Zrobiłem standaryzację Z-score cech klimatycznych
+
+Dla cech klimatycznych zastosowałem:
+
+```text
+z = (x - średnia) / odchylenie_standardowe
+```
+
+Skalowane były te kolumny:
+
+```text
+Total_Precipitation
+Atmospheric_Pressure_Station
+Global_Radiation
+Air_Temperature
+Max_Air_Temperature
+Min_Air_Temperature
+Relative_Humidity
+Max_Relative_Humidity
+Min_Relative_Humidity
+Hourly_Wind_Speed
+Max_Wind_Gust
+```
+
+W pliku wynikowym mają one suffix `_z`, np.:
+
+```text
+Total_Precipitation_z
+Air_Temperature_z
+Hourly_Wind_Speed_z
+```
+
+Ten plik najlepiej nadaje się do:
+
+```text
+PCA
+k-Means na obserwacjach miesięcznych
+HAC na obserwacjach miesięcznych
+kNN / SVM / sieci neuronowe — ale ostrożnie, patrz niżej
+wizualizacji wielowymiarowej
+```
+
+## 3. Dodałem klasy wylesiania
+
+Utworzyłem dwie wersje klasy docelowej:
+
+```text
+Deforestation_Class_Median
+Deforestation_Class_Q75
+```
+
+Progi z Twoich danych:
+
+```text
+q25 = 565.78 ha
+mediana / q50 = 2334.63 ha
+q75 = 8851.50 ha
+```
+
+Czyli:
+
+```text
+Deforestation_Class_Median = 1, jeśli Deforestation_ha > 2334.63
+Deforestation_Class_Q75 = 1, jeśli Deforestation_ha > 8851.50
+```
+
+Do projektu lepiej użyć `Deforestation_Class_Q75`, bo mocniej oddziela przypadki wysokiego wylesiania od reszty.
+
+## 4. Przygotowałem osobny plik do klasteryzacji stanów
+
+To jest bardzo ważna poprawka względem Twojego planu.
+
+Jeśli chcesz „pogrupować brazylijskie stany”, to nie powinieneś odpalać k-Means bezpośrednio na wszystkich miesięcznych wierszach. Wtedy algorytm grupowałby raczej **obserwacje miesięczne**, a nie stany.
+
+Dlatego zrobiłem plik:
+
+```text
+climate_deforestation_state_level_clustering_zscore.csv
+```
+
+Tam jest:
+
+```text
+1 wiersz = 1 stan
+```
+
+Dane zostały najpierw zagregowane po `State`, a dopiero potem wystandaryzowane.
+
+Ten plik jest właściwy do:
+
+```text
+k-Means
+HAC
+silhouette score
+porównania profili stanów
+```
+
+## 5. Przygotowałem plik do reguł asocjacyjnych
+
+Do reguł asocjacyjnych nie używa się Z-score, tylko dyskretyzacji.
+
+Dlatego zrobiłem plik:
+
+```text
+climate_deforestation_association_rules_discretized.csv
+```
+
+Cechy klimatyczne dostały poziomy:
+
+```text
+Low
+Medium
+High
+```
+
+według tercyli.
+
+Wylesianie dostało poziomy:
+
+```text
+Low
+Medium
+High
+Critical
+```
+
+według kwartylów.
+
+To pozwala szukać reguł typu:
+
+```text
+JEŚLI Total_Precipitation_Level = Low
+ORAZ Air_Temperature_Level = High
+TO Deforestation_Level = Critical
+```
+
+## Najważniejsza uwaga do klasyfikacji
+
+Do klasyfikacji **nie używaj globalnie przeskalowanego pliku jako jedynej podstawy train/test**, bo wtedy skalowanie zna rozkład całego zbioru, także testowego.
+
+Dlatego do klasyfikacji dałem osobny plik:
+
+```text
+climate_deforestation_supervised_modeling_base.csv
+```
+
+Poprawna kolejność w kodzie powinna być taka:
+
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+
+X = df[
+    [
+        "Month_sin",
+        "Month_cos",
+        "Total_Precipitation",
+        "Atmospheric_Pressure_Station",
+        "Global_Radiation",
+        "Air_Temperature",
+        "Max_Air_Temperature",
+        "Min_Air_Temperature",
+        "Relative_Humidity",
+        "Max_Relative_Humidity",
+        "Min_Relative_Humidity",
+        "Hourly_Wind_Speed",
+        "Max_Wind_Gust",
+    ]
+]
+
+y = df["Deforestation_Class_Q75"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+model = Pipeline([
+    ("scaler", StandardScaler()),
+    ("classifier", KNeighborsClassifier())
+])
+
+model.fit(X_train, y_train)
+```
+
+To jest metodycznie poprawne.
+
+## Krótka ocena
+
+Masz teraz dane przygotowane sensownie pod każdy etap:
+
+```text
+PCA / EDA:
+climate_deforestation_row_level_zscore_features.csv
+
+Klasteryzacja stanów:
+climate_deforestation_state_level_clustering_zscore.csv
+
+Klasyfikacja:
+climate_deforestation_supervised_modeling_base.csv + Pipeline ze StandardScaler
+
+Reguły asocjacyjne:
+climate_deforestation_association_rules_discretized.csv
+```
+
+Najważniejsze: nie zrobiłem jednego „magicznego” pliku do wszystkiego, bo to byłoby metodologicznie słabe. Rozdzielenie wersji danych jest tutaj właściwe.
